@@ -1,0 +1,125 @@
+---
+- name: install Docker
+  hosts: app
+  gather_facts: true
+  become: true
+  tasks:
+    - name: add docker gpg key RedHat
+      rpm_key:
+        key: "https://download.docker.com/linux/centos/gpg"
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: add docker gpg key Ubuntu
+      apt_key:
+        url: "https://download.docker.com/linux/ubuntu/gpg"
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Add Docker repository RedHat
+      yum_repository:
+        name: docker-repo
+        baseurl: "https://download.docker.com/linux/centos/7/x86_64/stable/"
+        description: docker yum repo setup
+        gpgcheck: yes
+      when: ansible_os_family == 'RedHat'
+      
+    - name: Add Docker repository Debian
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu focal stable"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+        state: latest
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+        
+     
+    - name: Install Docker RedHat
+      package:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: latest
+      when: ansible_os_family == 'RedHat'
+      
+    - name: Install Docker Ubuntu
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+      
+        
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+- name: Install PostgreSQL
+  hosts: database
+  gather_facts: false
+  become: true
+  tasks:
+  
+    - name: Install packages
+      apt:
+        name:
+          - postgresql
+          - postgresql-contrib
+          - libpq-dev
+          - python3-psycopg2
+        state: present
+
+    - name: Check if PostgreSQL is initialized
+      stat:
+        path: "{{ postgresql_data_dir }}/pg_hba.conf"
+      register: postgres_data
+
+    - name: Empty data dir
+      file:
+        path: "{{ postgresql_data_dir }}"
+        state: absent
+      when: not postgres_data.stat.exists
+      
+    - name: Reset database user.
+      become: true
+      become_method: sudo
+      become_user: postgres
+      postgresql_user:
+        db: postgres
+        user: postgres
+        password: "{{ postgres_password }}"
+      no_log: true
+
+    - name: Give privilage to postgres
+      file:
+        path: usr/lib/postgresql
+        owner: postgres
+        group: postgres
+        state: directory
+
+    - name: Initialize PostgreSQL
+      shell: "/{{ postgresql_bin_path }}/initdb -D /{{ postgresql_data_dir }}"
+      become: true
+      become_user: postgres
+      when: not postgres_data.stat.exists
+
+    - name: Start and enable service
+      service:
+        name: postgresql
+        state: started
+        enabled: true
